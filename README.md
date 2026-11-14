@@ -72,6 +72,41 @@ A push attempt with it fails, which is the property that matters:
 GH_TOKEN=… gh api -X PUT /repos/OWNER/REPO/contents/PROBE -f message=x -f content=eA==   # 403/404
 ```
 
+### Several accounts on the same host
+
+`gh` keeps one token per *host*, so two accounts on `github.com` cannot both be
+active — but `sbx` can pick the right one per repository. Store one keychain
+item per account, then map owners to items:
+
+```sh
+security add-generic-password -a "$USER" -s gh-ro.work     -w 'github_pat_…' -U
+security add-generic-password -a "$USER" -s gh-ro.personal -w 'github_pat_…' -U
+```
+
+```
+# ~/.config/agent-sandbox/gh-accounts
+devtactics    gh-ro.work
+speedywizard  gh-ro.personal
+```
+
+Resolution order:
+
+| step | source |
+|---|---|
+| 1 | `--gh-profile work` → item `gh-ro.work` |
+| 2 | `GH_ITEM` in the environment → that item verbatim |
+| 3 | owner of the `origin` remote, matched against `gh-accounts` |
+| 4 | `gh-ro` |
+
+Owner extraction handles `git@github.com:owner/repo.git`,
+`https://github.com/owner/repo.git` and `ssh://git@github.com:22/owner/repo.git`.
+`SBX_DEBUG=1 sbx …` prints which item was chosen. The file fallback checks
+`gh-token.<item>` first, then `gh-token`.
+
+Mapping by owner assumes repositories are namespaced by account or org; if one
+account owns repositories across several orgs, list every org that should
+resolve to it.
+
 `sbx` reads it with `security find-generic-password` *before* applying the
 sandbox, then exports `GH_CONFIG_DIR` (under `~/.local/state`) and `GH_TOKEN`.
 A fine-grained token with **Pull requests: read** and **Actions: read** cannot

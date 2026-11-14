@@ -36,6 +36,7 @@ while [ $# -gt 0 ]; do
     --no-network) NET=0; shift ;;
     --net-unix)   NET=2; shift ;;
     --no-gh)      GH=0; shift ;;
+    --gh-profile) GH_PROFILE="$2"; shift 2 ;;
     --keychain)   KEYCHAIN=1; shift ;;
     --ssh-agent)  SSH_AGENT=1; shift ;;
     --print)      PRINT=1; shift ;;
@@ -164,15 +165,44 @@ fi
 # outside the sandbox, and handed over as GH_TOKEN; gh's config dir lives under
 # ~/.local/state, which the profile already allows. The login keychain is the
 # preferred source; $CONF_DIR/gh-token is the fallback.
+# Which token: --gh-profile, then $GH_ITEM, then the owner of origin in
+# $CONF_DIR/gh-accounts, then the default item. Lets one machine hold several
+# accounts on the same host.
+gh_owner() {
+  _url=$(git -C "$PROJECT" remote get-url origin 2>/dev/null) || return 1
+  _url=${_url%.git}
+  case "$_url" in
+    *://*) _rest=${_url#*://}; _rest=${_rest#*@}; _owner=${_rest#*/}; _owner=${_owner%%/*} ;;
+    *@*:*) _rest=${_url#*:}; _owner=${_rest%%/*} ;;
+    *) return 1 ;;
+  esac
+  [ -n "$_owner" ] && printf '%s' "$_owner"
+}
+
+gh_item() {
+  [ -n "${GH_PROFILE:-}" ] && { printf 'gh-ro.%s' "$GH_PROFILE"; return; }
+  [ -n "${GH_ITEM:-}" ]    && { printf '%s' "$GH_ITEM"; return; }
+  _owner=$(gh_owner) || _owner=""
+  if [ -n "$_owner" ] && [ -f "$CONF_DIR/gh-accounts" ]; then
+    while read -r _name _item; do
+      case "$_name" in ''|'#'*) continue ;; esac
+      [ "$_name" = "$_owner" ] && { printf '%s' "$_item"; return; }
+    done < "$CONF_DIR/gh-accounts"
+  fi
+  printf 'gh-ro'
+}
+
 if [ "$GH" -eq 1 ]; then
+  item=$(gh_item)
+  [ "${SBX_DEBUG:-0}" = "1" ] && printf 'sbx: gh token item → %s\n' "$item" >&2
   gh_token=""
   if [ -x /usr/bin/security ]; then
     gh_token=$(/usr/bin/security find-generic-password \
-      -a "${GH_ACCOUNT:-$USER}" -s "${GH_ITEM:-gh-ro}" -w 2>/dev/null) || gh_token=""
+      -a "${GH_ACCOUNT:-$USER}" -s "$item" -w 2>/dev/null) || gh_token=""
   fi
-  if [ -z "$gh_token" ] && [ -f "$CONF_DIR/gh-token" ]; then
-    gh_token=$(cat "$CONF_DIR/gh-token")
-  fi
+  for f in "$CONF_DIR/gh-token.$item" "$CONF_DIR/gh-token"; do
+    [ -z "$gh_token" ] && [ -f "$f" ] && gh_token=$(cat "$f")
+  done
   if [ -n "$gh_token" ]; then
     export GH_CONFIG_DIR="$HOME/.local/state/agent-sandbox/gh"
     export GH_TOKEN="$gh_token"
