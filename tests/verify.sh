@@ -25,6 +25,10 @@ check "docker socket"           fail "$SBX" sh -c 'curl -s --max-time 5 --unix-s
 check "dns resolution"          pass "$SBX" python3 -c 'import socket;print(socket.gethostbyname("example.com"))'
 check "https egress"            pass "$SBX" sh -c 'curl -s -o /dev/null -w "%{http_code}" https://example.com'
 check "no-network blocks egress" fail "$SBX" --no-network sh -c 'curl -s -m 5 -o /dev/null -w "%{http_code}" https://example.com'
+if /usr/bin/security find-generic-password -a "$USER" -s "${GH_ITEM:-gh-ro}" -w >/dev/null 2>&1 \
+   || [ -f "$HOME/.config/agent-sandbox/gh-token" ]; then
+  check "gh reaches the API"    pass "$SBX" gh api rate_limit --jq .rate.remaining
+fi
 check "dev server binds"        pass "$SBX" sh -c 'python3 -c "import socket;s=socket.socket();s.bind((\"127.0.0.1\",0));s.listen();print(s.getsockname()[1])"'
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

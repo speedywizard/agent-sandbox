@@ -21,23 +21,26 @@ boundary — which a shell-only sandbox does not.
 ## GitHub CLI
 
 `gh` reads `~/.config/gh`, which the profile denies along with the OAuth token
-inside it. To let the agent read PRs and check output without handing over a
-push-capable token, put a read-only token in one file — it applies to every
-repository:
+inside it. A read-only token, kept in the login keychain, gives the agent PR and
+check output in every repository without a push-capable credential:
 
 ```sh
-printf 'github_pat_…' > ~/.config/agent-sandbox/gh-token
-chmod 600 ~/.config/agent-sandbox/gh-token
+security add-generic-password -a "$USER" -s gh-ro -w 'github_pat_…' -U
 ```
 
-`sbx` then exports `GH_CONFIG_DIR` (under `~/.local/state`) and `GH_TOKEN`
-before exec, so `gh pr checks` works in any repository, and `--no-gh` turns it
-off for a session.
-
+`sbx` reads it with `security find-generic-password` *before* applying the
+sandbox, then exports `GH_CONFIG_DIR` (under `~/.local/state`) and `GH_TOKEN`.
 A fine-grained token with **Pull requests: read** and **Actions: read** cannot
-push. Note that selecting *all repositories* also lets the agent read every
-repository's code, so scope it to selected repositories if that matters more
-than convenience.
+push. `GH_ITEM` / `GH_ACCOUNT` override the keychain lookup, and `--no-gh` turns
+the whole thing off for a session.
+
+A plain file at `~/.config/agent-sandbox/gh-token` is used as a fallback when the
+keychain has no such item.
+
+Selecting *all repositories* for the token also lets the agent read every
+repository's code; scope it to selected repositories when that matters more than
+convenience. Either way the token is visible to the sandboxed process
+environment, so its scope is the ceiling on what a leaked value could do.
 
 ## Verify
 

@@ -160,13 +160,24 @@ if [ "$PRINT" -eq 1 ]; then
   exit 0
 fi
 
-# Optional shared gh(1) setup: one token file, every repository. The token is
-# read here, outside the sandbox, and handed over as GH_TOKEN; gh's config dir
-# lives under ~/.local/state, which the profile already allows.
-if [ "$GH" -eq 1 ] && [ -f "$CONF_DIR/gh-token" ]; then
-  export GH_CONFIG_DIR="$HOME/.local/state/agent-sandbox/gh"
-  export GH_TOKEN="$(cat "$CONF_DIR/gh-token")"
-  mkdir -p "$GH_CONFIG_DIR"
+# Optional shared gh(1) setup: one token, every repository. It is read here,
+# outside the sandbox, and handed over as GH_TOKEN; gh's config dir lives under
+# ~/.local/state, which the profile already allows. The login keychain is the
+# preferred source; $CONF_DIR/gh-token is the fallback.
+if [ "$GH" -eq 1 ]; then
+  gh_token=""
+  if [ -x /usr/bin/security ]; then
+    gh_token=$(/usr/bin/security find-generic-password \
+      -a "${GH_ACCOUNT:-$USER}" -s "${GH_ITEM:-gh-ro}" -w 2>/dev/null) || gh_token=""
+  fi
+  if [ -z "$gh_token" ] && [ -f "$CONF_DIR/gh-token" ]; then
+    gh_token=$(cat "$CONF_DIR/gh-token")
+  fi
+  if [ -n "$gh_token" ]; then
+    export GH_CONFIG_DIR="$HOME/.local/state/agent-sandbox/gh"
+    export GH_TOKEN="$gh_token"
+    mkdir -p "$GH_CONFIG_DIR"
+  fi
 fi
 
 mkdir -p "$CACHE_DIR"
