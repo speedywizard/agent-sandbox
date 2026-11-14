@@ -3,7 +3,8 @@
 #
 #   sbx pi                      # sandbox pi to the current project
 #   sbx claude                  # same boundary, Claude Code
-#   sbx --no-network pi         # also deny all network egress
+#   sbx --no-network pi         # deny all network
+#   sbx --net-unix pi           # also allow unix sockets (docker, agents, …)
 #   sbx --print pi              # show the generated profile, run nothing
 #   sbx -- bash -lc 'npm test'  # any command, same boundary
 #
@@ -32,6 +33,7 @@ SSH_AGENT=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-network) NET=0; shift ;;
+    --net-unix)   NET=2; shift ;;
     --keychain)   KEYCHAIN=1; shift ;;
     --ssh-agent)  SSH_AGENT=1; shift ;;
     --print)      PRINT=1; shift ;;
@@ -112,10 +114,21 @@ profile=""
 profile+=$'(version 1)\n(deny default)\n'
 profile+=$'(allow process*)\n(allow signal)\n(allow sysctl-read)\n'
 profile+=$'(allow mach-lookup)\n'
-if [ "$NET" -eq 1 ]; then
+if [ "$NET" -eq 0 ]; then
+  profile+=$'(deny network*)\n'
+elif [ "$NET" -eq 2 ]; then
+  # Everything, including unix sockets — any local daemon the user can reach.
   profile+=$'(allow network*)\n'
 else
-  profile+=$'(deny network*)\n'
+  # TCP/UDP only. Seatbelt's network* would also permit connecting to unix
+  # sockets, which means the docker socket, ssh-agent, gpg-agent and friends:
+  # filesystem isolation would not survive a single `docker run -v ~:/host`.
+  profile+=$'(allow network-outbound (remote tcp "*:*"))\n'
+  profile+=$'(allow network-outbound (remote udp "*:*"))\n'
+  profile+=$'(allow network-bind (local tcp "*:*"))\n'
+  profile+=$'(allow network-inbound (local tcp "*:*"))\n'
+  profile+=$'(allow network-outbound (literal "/private/var/run/mDNSResponder"))\n'
+  profile+=$'(allow network-outbound (literal "/var/run/mDNSResponder"))\n'
 fi
 # dyld resolves the shared-cache volume by opening /; without this the child
 # aborts before main() when reads are otherwise filtered.

@@ -10,12 +10,21 @@ sbx pi                  # sandbox pi to the current project
 sbx claude              # same boundary, Claude Code
 sbx --no-network pi     # also deny all network egress
 sbx --print pi          # dump the generated profile, run nothing
+sbx --net-unix pi       # also allow unix sockets (see Limits)
 sbx -- bash -lc 'make'  # any command, same boundary
 ```
 
 Seatbelt profiles are inherited by every child process, so this covers the
 agent's shell, its built-in file tools, hooks, MCP servers and subagents in one
 boundary — which a shell-only sandbox does not.
+
+## Verify
+
+```sh
+./tests/verify.sh /path/to/some/repo
+```
+
+Runs each claim from this file against a scratch repository.
 
 ## Install
 
@@ -93,9 +102,16 @@ global names — not `127.0.0.1:PORT`.
   agent can see that `~/.ssh` exists and list the names of your home directory;
   it cannot read or write their contents.
 - **`/private/tmp` is shared** and writable.
-- **`--no-network` is the only way to close egress completely**; with network on,
-  unix sockets are reachable, which is why `SSH_AUTH_SOCK` is dropped rather
-  than relied on being unreadable.
+- **Unix sockets are a filesystem bypass if you allow them.** Seatbelt's
+  `network*` permission covers unix domain sockets, not just TCP, so a profile
+  that grants it lets the agent connect to *any* local daemon whose socket it
+  knows — the docker socket being the obvious one (`docker run -v ~:/host` ends
+  the filesystem boundary instantly). The default profile therefore grants
+  `(remote tcp "*:*")`, `(remote udp "*:*")`, local binds and the
+  `mDNSResponder` socket only, and `sbx` additionally drops `SSH_AUTH_SOCK`.
+  `--net-unix` restores the permissive form. Note that denying a socket *path*
+  does not block connecting to it — only the network permission does.
+- **`--no-network` is the only way to close egress completely.**
 - **Network is open** unless you pass `--no-network`; the remaining risk with
   secrets unreadable is prompt injection and supply chain, not exfiltration of
   stored credentials.
