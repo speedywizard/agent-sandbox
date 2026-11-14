@@ -202,6 +202,12 @@ Agent state added automatically:
 - `claude` → `~/.claude` (or `$CLAUDE_CONFIG_DIR`), `~/.claude.json`,
   `~/.local/share/claude`, `~/.cache/claude`, `~/Library/Caches/claude-cli-nodejs`
 
+Skills are readable regardless of where the session keeps its state:
+`~/.agents` for every agent, and `~/.claude` read-only for Claude Code even when
+`CLAUDE_CONFIG_DIR` points at a project-specific directory — otherwise custom
+config dirs silently lose `~/.claude/skills`. They stay read-only; if something
+needs to install into them, add the path to `allow-rw.txt`.
+
 Writes to `.git/hooks` and `.git/config` inside the project are denied, so an
 agent can commit but cannot plant a hook that later runs outside the sandbox
 when *you* commit, or redirect `core.hooksPath`.

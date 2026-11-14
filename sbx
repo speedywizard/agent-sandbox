@@ -89,6 +89,14 @@ READ_DIRS=(
   "$HOME/.config/git" "$HOME/.gitconfig" "$HOME/.config/mise"
 )
 
+# Shared skill directories, and the default Claude config even when
+# CLAUDE_CONFIG_DIR points elsewhere: skills must not disappear just because the
+# session writes its state into a project-specific directory.
+READ_DIRS+=( "$HOME/.agents" )
+case "$AGENT" in
+  claude) READ_DIRS+=( "$HOME/.claude" ) ;;
+esac
+
 # --- read+write: project, temp, agent state --------------------------------
 WRITE_DIRS=(
   "$PROJECT"
@@ -120,7 +128,7 @@ EXTRA_WRITE=("${EXTRA[@]+"${EXTRA[@]}"}")
 
 # --- build the profile ------------------------------------------------------
 q() { printf '"%s"' "$1"; }
-ancestors() { local p out=""; for f in "$@"; do case "$f" in /*) ;; *) continue ;; esac; p=$(dirname -- "$f"); while [ "$p" != "/" ] && [ -n "$p" ]; do case " $out " in *" $p "*) ;; *) out+=" $p" ;; esac; p=$(dirname -- "$p"); done; done; for p in $out; do case "$p" in "$HOME/.config"|"$HOME/Library"|"$HOME/.ssh"|"$HOME/.aws"|"$HOME/.gnupg") continue ;; esac; [ -d "$p" ] && printf ' (literal "%s")' "$p"; done; }
+ancestors() { local p out=""; for f in "$@"; do case "$f" in /*) ;; *) continue ;; esac; p=$(dirname -- "$f"); while [ "$p" != "/" ] && [ -n "$p" ]; do case " $out " in *" $p "*) ;; *) out+=" $p" ;; esac; p=$(dirname -- "$p"); done; done; for p in $out; do case "$p" in "$HOME/.config"|"$HOME/Library"|"$HOME/.ssh"|"$HOME/.aws"|"$HOME/.gnupg") continue ;; esac; [ -d "$p" ] && printf ' (literal "%s")' "$p"; done; return 0; }
 sub() { local out=""; for p in "$@"; do [ -e "$p" ] && out+=" (subpath $(q "$p"))"; done; printf '%s' "$out"; }
 
 profile=""
