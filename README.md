@@ -18,6 +18,27 @@ Seatbelt profiles are inherited by every child process, so this covers the
 agent's shell, its built-in file tools, hooks, MCP servers and subagents in one
 boundary — which a shell-only sandbox does not.
 
+## GitHub CLI
+
+`gh` reads `~/.config/gh`, which the profile denies along with the OAuth token
+inside it. To let the agent read PRs and check output without handing over a
+push-capable token, put a read-only token in one file — it applies to every
+repository:
+
+```sh
+printf 'github_pat_…' > ~/.config/agent-sandbox/gh-token
+chmod 600 ~/.config/agent-sandbox/gh-token
+```
+
+`sbx` then exports `GH_CONFIG_DIR` (under `~/.local/state`) and `GH_TOKEN`
+before exec, so `gh pr checks` works in any repository, and `--no-gh` turns it
+off for a session.
+
+A fine-grained token with **Pull requests: read** and **Actions: read** cannot
+push. Note that selecting *all repositories* also lets the agent read every
+repository's code, so scope it to selected repositories if that matters more
+than convenience.
+
 ## Verify
 
 ```sh

@@ -30,10 +30,12 @@ NET=1
 PRINT=0
 KEYCHAIN=0
 SSH_AGENT=0
+GH=1
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-network) NET=0; shift ;;
     --net-unix)   NET=2; shift ;;
+    --no-gh)      GH=0; shift ;;
     --keychain)   KEYCHAIN=1; shift ;;
     --ssh-agent)  SSH_AGENT=1; shift ;;
     --print)      PRINT=1; shift ;;
@@ -156,6 +158,15 @@ profile+=$'(deny file-read*)'"$(sub "${deny_paths[@]}")"$'\n'
 if [ "$PRINT" -eq 1 ]; then
   printf '%s' "$profile"
   exit 0
+fi
+
+# Optional shared gh(1) setup: one token file, every repository. The token is
+# read here, outside the sandbox, and handed over as GH_TOKEN; gh's config dir
+# lives under ~/.local/state, which the profile already allows.
+if [ "$GH" -eq 1 ] && [ -f "$CONF_DIR/gh-token" ]; then
+  export GH_CONFIG_DIR="$HOME/.local/state/agent-sandbox/gh"
+  export GH_TOKEN="$(cat "$CONF_DIR/gh-token")"
+  mkdir -p "$GH_CONFIG_DIR"
 fi
 
 mkdir -p "$CACHE_DIR"
