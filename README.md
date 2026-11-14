@@ -60,6 +60,21 @@ Create it in the browser instead:
 5. Set an expiration, generate, and copy the `github_pat_…` value — it is shown
    once.
 
+If the repositories belong to an organisation, the token may sit **pending
+approval** even when you selected the repo: many orgs require it. Until an org
+owner approves it under *Org → Settings → Personal access tokens*, every request
+against that org's repositories returns **404**, not 403 — the repo looks like it
+does not exist, which reads as "wrong account" rather than "not approved yet".
+Pending requests are eventually discarded if nobody acts on them.
+
+Check the state from inside the sandbox:
+
+```sh
+sbx gh api user/orgs --jq '.[].login'                             # membership
+sbx gh api user/memberships/orgs/OWNER --jq .state                # active | pending
+sbx gh api repos/OWNER/REPO --jq .full_name                       # 200 means the grant exists
+```
+
 Then hand it to `sbx`:
 
 ```sh
