@@ -1,0 +1,6 @@
+# Extra paths the sandboxed agent may READ (one per line).
+# ~ and $PROJECT expand; lines starting with # are ignored.
+# Examples:
+# ~/src/shared-lib
+# $PROJECT/../fixtures
+# ~/Library/Application Support/SomeTool

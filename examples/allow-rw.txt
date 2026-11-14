@@ -1,0 +1,5 @@
+# Extra paths the sandboxed agent may READ AND WRITE (one per line).
+# ~ and $PROJECT expand; lines starting with # are ignored.
+# Examples:
+# ~/.local/share/my-toolchain
+# $PROJECT/../generated

@@ -1,0 +1,158 @@
+#!/bin/bash
+# sbx — run a coding agent confined to its project directory (macOS Seatbelt).
+#
+#   sbx pi                      # sandbox pi to the current project
+#   sbx claude                  # same boundary, Claude Code
+#   sbx --no-network pi         # also deny all network egress
+#   sbx --print pi              # show the generated profile, run nothing
+#   sbx -- bash -lc 'npm test'  # any command, same boundary
+#
+# The environment is inherited unchanged. State dirs follow the agents' own
+# overrides: PI_CODING_AGENT_DIR for pi, CLAUDE_CONFIG_DIR for Claude Code.
+#
+# Boundary: read/write the project (git toplevel or $PWD), read the system and
+# toolchain caches, read/write the agent's own state dir and temp. Everything
+# else is denied by default — ~/.ssh, ~/.aws, ~/.gnupg, keychains, other repos.
+#
+# Extend it without editing this file:
+#   ~/.config/agent-sandbox/allow-read.txt   one path per line, read-only
+#   ~/.config/agent-sandbox/allow-rw.txt     one path per line, read+write
+# Paths may use ~ and $PROJECT.
+#
+set -eo pipefail   # no -u: macOS bash 3.2 trips on empty array expansions
+
+SANDBOX_EXEC=/usr/bin/sandbox-exec
+CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/agent-sandbox"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/sbx"
+
+NET=1
+PRINT=0
+KEYCHAIN=0
+SSH_AGENT=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --no-network) NET=0; shift ;;
+    --keychain)   KEYCHAIN=1; shift ;;
+    --ssh-agent)  SSH_AGENT=1; shift ;;
+    --print)      PRINT=1; shift ;;
+    --)           shift; break ;;
+    -h|--help)    sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *)            break ;;
+  esac
+done
+
+if [ $# -eq 0 ]; then
+  echo "sbx: no command given. Try: sbx pi" >&2
+  exit 2
+fi
+
+AGENT=$(basename -- "$1")
+PROJECT=$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)
+PROJECT=$(cd "$PROJECT" && pwd -P)
+
+# Anything outside $HOME is allowed nothing; inside, only what is listed.
+[ -d "$PROJECT" ] || { echo "sbx: project not found: $PROJECT" >&2; exit 2; }
+
+# --- what each agent needs to keep its own sessions -------------------------
+STATE_DIRS=()
+case "$AGENT" in
+  pi)     STATE_DIRS=("${PI_CODING_AGENT_DIR:-$HOME/.pi}" "$HOME/.context-mode") ;;
+  claude) STATE_DIRS=("${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$HOME/.claude.json" \
+                      "$HOME/.local/share/claude" "$HOME/.cache/claude" \
+                      "$HOME/Library/Caches/claude-cli-nodejs") ;;
+esac
+
+# --- read-only: system, toolchains, caches ---------------------------------
+READ_DIRS=(
+  /usr /bin /sbin /System /System/Volumes /Library /private/etc /dev /private/var/db/dyld
+  /tmp /var /etc /nix /opt /private/var/select
+  /opt/homebrew /usr/local /opt/local
+  "$HOME/.npm" "$HOME/.bun" "$HOME/.deno" "$HOME/.cargo" "$HOME/.rustup"
+  "$HOME/.pyenv" "$HOME/.go" "$HOME/go" "$HOME/.nvm"
+  "$HOME/.local/bin" "$HOME/.local/share/mise" "$HOME/.local/share/pnpm"
+  "$HOME/.local/share/uv" "$HOME/.cache/uv"
+  "$HOME/.config/git" "$HOME/.gitconfig" "$HOME/.config/mise"
+)
+
+# --- read+write: project, temp, agent state --------------------------------
+WRITE_DIRS=(
+  "$PROJECT"
+  /private/tmp /private/var/folders
+  "$HOME/.cache" "$HOME/.local/state" "$HOME/Library/Caches"
+)
+[ -n "${TMPDIR:-}" ] && WRITE_DIRS+=("${TMPDIR%/}")
+for d in "${STATE_DIRS[@]+"${STATE_DIRS[@]}"}"; do WRITE_DIRS+=("$d"); done
+
+# --- user extensions --------------------------------------------------------
+read_extra() { # $1 = file, $2 = var name prefix
+  local f="$1" line
+  [ -f "$f" ] || return 0
+  while IFS= read -r line; do
+    case "$line" in ''|'#'*) continue ;; esac
+    line="${line/#\~/$HOME}"
+    line="${line//\$PROJECT/$PROJECT}"
+    EXTRA+=("$line")
+  done < "$f"
+}
+EXTRA=(); read_extra "$CONF_DIR/allow-read.txt"
+EXTRA_READ=("${EXTRA[@]+"${EXTRA[@]}"}")
+EXTRA=(); read_extra "$CONF_DIR/allow-rw.txt"
+EXTRA_WRITE=("${EXTRA[@]+"${EXTRA[@]}"}")
+# Placeholders so empty arrays never expand to nothing; sub() skips missing paths.
+[ ${#EXTRA_READ[@]}  -eq 0 ] && EXTRA_READ=("")
+[ ${#EXTRA_WRITE[@]} -eq 0 ] && EXTRA_WRITE=("")
+[ ${#STATE_DIRS[@]}  -eq 0 ] && STATE_DIRS=("")
+
+# --- build the profile ------------------------------------------------------
+q() { printf '"%s"' "$1"; }
+ancestors() { local p out=""; for f in "$@"; do case "$f" in /*) ;; *) continue ;; esac; p=$(dirname -- "$f"); while [ "$p" != "/" ] && [ -n "$p" ]; do case " $out " in *" $p "*) ;; *) out+=" $p" ;; esac; p=$(dirname -- "$p"); done; done; for p in $out; do case "$p" in "$HOME/.config"|"$HOME/Library"|"$HOME/.ssh"|"$HOME/.aws"|"$HOME/.gnupg") continue ;; esac; [ -d "$p" ] && printf ' (literal "%s")' "$p"; done; }
+sub() { local out=""; for p in "$@"; do [ -e "$p" ] && out+=" (subpath $(q "$p"))"; done; printf '%s' "$out"; }
+
+profile=""
+profile+=$'(version 1)\n(deny default)\n'
+profile+=$'(allow process*)\n(allow signal)\n(allow sysctl-read)\n'
+profile+=$'(allow mach-lookup)\n'
+if [ "$NET" -eq 1 ]; then
+  profile+=$'(allow network*)\n'
+else
+  profile+=$'(deny network*)\n'
+fi
+# dyld resolves the shared-cache volume by opening /; without this the child
+# aborts before main() when reads are otherwise filtered.
+profile+=$'(allow file-read* (literal "/"))\n'
+profile+=$'(allow file-read*'"$(sub "${READ_DIRS[@]}" "${EXTRA_READ[@]}" "${STATE_DIRS[@]}")"$')\n'
+profile+=$'(allow file-read*'"$(ancestors "${READ_DIRS[@]}" "${WRITE_DIRS[@]}" "${EXTRA_READ[@]}" "${EXTRA_WRITE[@]}" "${STATE_DIRS[@]}")"$')\n'
+profile+=$'(allow file-read* file-write*'"$(sub "${WRITE_DIRS[@]}" "${EXTRA_WRITE[@]}")"$')\n'
+profile+=$'(allow file-write* (subpath "/dev"))'$'\n'
+# Terminal ioctls (TIOCGETD/TIOCGWINSZ…) are denied by default; without this,
+# stty and TUI capability probes fail and apps fall back to printable escapes.
+profile+=$'(allow file-ioctl (subpath "/dev"))'$'\n'
+
+# Escalation vectors: a hook the agent writes runs later, unsandboxed, when you
+# commit; a core.hooksPath rewrite does the same. Deny both, last so it wins.
+if [ -d "$PROJECT/.git" ]; then
+  profile+=$'(deny file-write* (subpath '"$(q "$PROJECT/.git/hooks")"$') (literal '"$(q "$PROJECT/.git/config")"$'))\n'
+fi
+
+[ "$KEYCHAIN" -eq 1 ] && profile+=$'(allow file-read* file-write* (subpath '"$(q "$HOME/Library/Keychains")"$'))\n'
+# Belt and braces: even if a future allow above is widened, these stay shut.
+deny_paths=( "$HOME/.ssh" "$HOME/.aws" "$HOME/.gnupg" "$HOME/.config/gh" "$HOME/.kube" "$HOME/.docker" )
+[ "$KEYCHAIN" -eq 0 ] && deny_paths+=( "$HOME/Library/Keychains" )
+profile+=$'(deny file-read*)'"$(sub "${deny_paths[@]}")"$'\n'
+
+if [ "$PRINT" -eq 1 ]; then
+  printf '%s' "$profile"
+  exit 0
+fi
+
+mkdir -p "$CACHE_DIR"
+prof="$CACHE_DIR/$(printf '%s' "$PROJECT" | /usr/bin/shasum | cut -c1-16).sb"
+printf '%s' "$profile" > "$prof"
+
+# Seatbelt's network* also permits unix sockets, so an inherited SSH_AUTH_SOCK
+# reaches the agent and the sandbox can push. Drop it unless asked for.
+if [ "$SSH_AGENT" -eq 0 ]; then
+  unset SSH_AUTH_SOCK
+fi
+
+exec "$SANDBOX_EXEC" -f "$prof" -- "$@"
