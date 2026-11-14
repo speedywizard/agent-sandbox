@@ -31,6 +31,7 @@ PRINT=0
 KEYCHAIN=0
 SSH_AGENT=0
 GH=1
+DOCTOR=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-network) NET=0; shift ;;
@@ -38,6 +39,7 @@ while [ $# -gt 0 ]; do
     --no-gh)      GH=0; shift ;;
     --gh-profile) GH_PROFILE="$2"; shift 2 ;;
     --project)    PROJECT_OVERRIDE="$2"; shift 2 ;;
+    --gh-doctor)  DOCTOR=1; shift ;;
     --keychain)   KEYCHAIN=1; shift ;;
     --ssh-agent)  SSH_AGENT=1; shift ;;
     --print)      PRINT=1; shift ;;
@@ -47,7 +49,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-if [ $# -eq 0 ]; then
+if [ $# -eq 0 ] && [ "$DOCTOR" -eq 0 ]; then
   echo "sbx: no command given. Try: sbx pi" >&2
   exit 2
 fi
@@ -242,6 +244,31 @@ ASKPASS
     export GIT_ASKPASS="$askpass"
     export GIT_TERMINAL_PROMPT=0
   fi
+fi
+
+if [ "$DOCTOR" -eq 1 ]; then
+  printf 'project       %s\n' "$PROJECT"
+  printf 'config dir    %s\n' "$CONF_DIR"
+  if [ -f "$CONF_DIR/gh-accounts" ]; then
+    printf 'gh-accounts   %s (%s entries)\n' "$CONF_DIR/gh-accounts" \
+      "$(grep -vcE '^[[:space:]]*(#|$)' "$CONF_DIR/gh-accounts" 2>/dev/null || echo 0)"
+  else
+    printf 'gh-accounts   missing\n'
+  fi
+  printf 'dir name      %s\n' "${PROJECT##*/}"
+  printf 'origin owner  %s\n' "$(gh_owner || echo '(none)')"
+  _item=$(gh_item)
+  printf 'chosen item   %s\n' "$_item"
+  if /usr/bin/security find-generic-password -a "${GH_ACCOUNT:-$USER}" -s "$_item" -w >/dev/null 2>&1; then
+    printf 'keychain      found\n'
+  else
+    printf 'keychain      not found (item %s, account %s)\n' "$_item" "${GH_ACCOUNT:-$USER}"
+  fi
+  for f in "$CONF_DIR/gh-token.$_item" "$CONF_DIR/gh-token"; do
+    [ -f "$f" ] && printf 'file fallback %s\n' "$f"
+  done
+  printf 'GH_TOKEN      %s\n' "$([ -n "${GH_TOKEN:-}" ] && echo '(already in environment)' || echo '(unset)')"
+  exit 0
 fi
 
 mkdir -p "$CACHE_DIR"
