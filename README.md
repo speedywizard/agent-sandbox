@@ -45,11 +45,17 @@ Create it in the browser instead:
 3. Repository access: *Only select repositories* for the narrow case, or *All
    repositories* if you want one token for everything.
 4. Repository permissions — set these to **Read-only**:
-   - **Pull requests** — for `gh pr view`, `gh pr checks`, `gh pr diff`
-   - **Actions** — for `gh run list`, `gh run view --log-failed`
-   - **Checks** — for check-run detail behind `gh pr checks`
+   - **Pull requests** — `gh pr view`, `gh pr checks`, `gh pr diff`
+   - **Actions** — `gh run list`, `gh run view --log-failed`
+   - **Commit statuses** — the legacy half of a PR's rollup
    - **Contents** — only if you also want `gh pr diff` to fetch file contents
    - **Metadata** is granted automatically and cannot be removed
+
+   There is no *Checks* permission to tick: the Checks API accepts GitHub App
+   tokens only, never fine-grained PATs, so check runs cannot be read directly.
+   `gh pr checks` uses the server-computed `statusCheckRollup` on the pull
+   request instead, which `Pull requests: read` covers — and `gh run view
+   --log-failed` (`Actions: read`) gives you the failing job logs either way.
 5. Set an expiration, generate, and copy the `github_pat_…` value — it is shown
    once.
 
