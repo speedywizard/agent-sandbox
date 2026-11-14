@@ -207,6 +207,21 @@ if [ "$GH" -eq 1 ]; then
     export GH_CONFIG_DIR="$HOME/.local/state/agent-sandbox/gh"
     export GH_TOKEN="$gh_token"
     mkdir -p "$GH_CONFIG_DIR"
+
+    # Git over HTTPS with the same read-only token. git push gets a 403, which
+    # is the point; ssh remotes still need --ssh-agent or an https URL.
+    askpass="$HOME/.local/state/agent-sandbox/git-askpass"
+    mkdir -p "$(dirname "$askpass")"
+    cat > "$askpass" <<'ASKPASS'
+#!/bin/sh
+case "$1" in
+  *[Uu]sername*) printf '%s\n' x-access-token ;;
+  *)             printf '%s\n' "${GH_TOKEN:-}" ;;
+esac
+ASKPASS
+    chmod 700 "$askpass"
+    export GIT_ASKPASS="$askpass"
+    export GIT_TERMINAL_PROMPT=0
   fi
 fi
 

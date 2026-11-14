@@ -122,6 +122,12 @@ the whole thing off for a session.
 A plain file at `~/.config/agent-sandbox/gh-token` is used as a fallback when the
 keychain has no such item.
 
+With a token wired in, `sbx` also exports `GIT_ASKPASS` (a tiny helper that
+answers with the same token) and `GIT_TERMINAL_PROMPT=0`, so **https** remotes
+fetch read-only and `git push` gets a 403. SSH remotes stay broken by design:
+`~/.ssh` is unreadable, so neither `~/.ssh/config` aliases nor keys resolve —
+switch that repository to an https URL, or pass `--ssh-agent` if you want push.
+
 Selecting *all repositories* for the token also lets the agent read every
 repository's code; scope it to selected repositories when that matters more than
 convenience. Either way the token is visible to the sandboxed process
