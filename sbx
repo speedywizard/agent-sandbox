@@ -199,6 +199,11 @@ gh_item() {
     # owner of origin — whichever comes first in the file wins.
     while read -r _name _item; do
       case "$_name" in ''|'#'*) continue ;; esac
+      # accept "key item", "key: item" and "key=item"
+      case "$_name" in
+        *'='*) [ -z "$_item" ] && { _item=${_name#*=}; _name=${_name%%=*}; } ;;
+      esac
+      _name=${_name%:}
       _key=$_name
       case "$_key" in "~/"*) _key="$HOME/${_key:2}" ;; esac
       case "$_key" in
@@ -254,6 +259,13 @@ if [ "$DOCTOR" -eq 1 ]; then
       "$(grep -vcE '^[[:space:]]*(#|$)' "$CONF_DIR/gh-accounts" 2>/dev/null || echo 0)"
   else
     printf 'gh-accounts   missing\n'
+  fi
+  if [ -f "$CONF_DIR/gh-accounts" ]; then
+    while read -r _n _i; do
+      case "$_n" in ''|'#'*) continue ;; esac
+      case "$_n" in *'='*) [ -z "$_i" ] && { _i=${_n#*=}; _n=${_n%%=*}; } ;; esac
+      printf '  entry       key=%s item=%s\n' "${_n%:}" "$_i"
+    done < "$CONF_DIR/gh-accounts"
   fi
   printf 'dir name      %s\n' "${PROJECT##*/}"
   printf 'origin owner  %s\n' "$(gh_owner || echo '(none)')"
