@@ -11,6 +11,7 @@ sbx claude              # same boundary, Claude Code
 sbx --no-network pi     # also deny all network egress
 sbx --print pi          # dump the generated profile, run nothing
 sbx --net-unix pi       # also allow unix sockets (see Limits)
+sbx --project DIR pi    # boundary = DIR instead of the git toplevel
 sbx -- bash -lc 'make'  # any command, same boundary
 ```
 
@@ -101,7 +102,7 @@ Resolution order:
 |---|---|
 | 1 | `--gh-profile work` → item `gh-ro.work` |
 | 2 | `GH_ITEM` in the environment → that item verbatim |
-| 3 | owner of the `origin` remote, matched against `gh-accounts` |
+| 3 | first matching key in `gh-accounts`: absolute path (`/…`), `~/…` path, project directory name, or owner of the `origin` remote |
 | 4 | `gh-ro` |
 
 Owner extraction handles `git@github.com:owner/repo.git`,
@@ -132,6 +133,22 @@ Selecting *all repositories* for the token also lets the agent read every
 repository's code; scope it to selected repositories when that matters more than
 convenience. Either way the token is visible to the sandboxed process
 environment, so its scope is the ceiling on what a leaked value could do.
+
+## Multi-repo workspaces
+
+`sbx` uses the git toplevel of the working directory, which is what you want in
+a single repository. For a workspace that holds several repositories plus notes,
+point it at the directory instead:
+
+```sh
+cd ~/work/detaso && sbx claude                 # works if detaso is not itself a repo
+sbx --project ~/work/detaso claude             # explicit, from anywhere
+```
+
+The boundary is then that directory and everything under it — wider than a
+single repo, so prefer the narrower run when one project is enough. Account
+mapping still works: a `gh-accounts` key may be the workspace path, its
+directory name, or a repository owner.
 
 ## Verify
 

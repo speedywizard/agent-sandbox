@@ -37,6 +37,7 @@ while [ $# -gt 0 ]; do
     --net-unix)   NET=2; shift ;;
     --no-gh)      GH=0; shift ;;
     --gh-profile) GH_PROFILE="$2"; shift 2 ;;
+    --project)    PROJECT_OVERRIDE="$2"; shift 2 ;;
     --keychain)   KEYCHAIN=1; shift ;;
     --ssh-agent)  SSH_AGENT=1; shift ;;
     --print)      PRINT=1; shift ;;
@@ -52,8 +53,15 @@ if [ $# -eq 0 ]; then
 fi
 
 AGENT=$(basename -- "$1")
-PROJECT=$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)
-PROJECT=$(cd "$PROJECT" && pwd -P)
+if [ -n "${PROJECT_OVERRIDE:-}" ]; then
+  _proj=$PROJECT_OVERRIDE
+  case "$_proj" in "~/"*) _proj="$HOME/${_proj:2}" ;; esac
+  PROJECT=$(cd "$_proj" 2>/dev/null && pwd -P) || {
+    echo "sbx: no such project: $PROJECT_OVERRIDE" >&2; exit 2; }
+else
+  PROJECT=$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)
+  PROJECT=$(cd "$PROJECT" && pwd -P)
+fi
 
 # Anything outside $HOME is allowed nothing; inside, only what is listed.
 [ -d "$PROJECT" ] || { echo "sbx: project not found: $PROJECT" >&2; exit 2; }
@@ -183,10 +191,21 @@ gh_item() {
   [ -n "${GH_PROFILE:-}" ] && { printf 'gh-ro.%s' "$GH_PROFILE"; return; }
   [ -n "${GH_ITEM:-}" ]    && { printf '%s' "$GH_ITEM"; return; }
   _owner=$(gh_owner) || _owner=""
-  if [ -n "$_owner" ] && [ -f "$CONF_DIR/gh-accounts" ]; then
+  _base=${PROJECT##*/}
+  if [ -f "$CONF_DIR/gh-accounts" ]; then
+    # A key matches the project path, the project's directory name, or the
+    # owner of origin — whichever comes first in the file wins.
     while read -r _name _item; do
       case "$_name" in ''|'#'*) continue ;; esac
-      [ "$_name" = "$_owner" ] && { printf '%s' "$_item"; return; }
+      _key=$_name
+      case "$_key" in "~/"*) _key="$HOME/${_key:2}" ;; esac
+      case "$_key" in
+        /*) _real=$(cd "$_key" 2>/dev/null && pwd -P)
+            [ "$_real" = "$PROJECT" ] && { printf '%s' "$_item"; return; } ; continue ;;
+      esac
+      if [ "$_key" = "$_base" ] || { [ -n "$_owner" ] && [ "$_key" = "$_owner" ]; }; then
+        printf '%s' "$_item"; return
+      fi
     done < "$CONF_DIR/gh-accounts"
   fi
   printf 'gh-ro'
