@@ -28,6 +28,50 @@ check output in every repository without a push-capable credential:
 security add-generic-password -a "$USER" -s gh-ro -w 'github_pat_…' -U
 ```
 
+### Where the token comes from
+
+There is no way to mint a personal access token from the CLI: GitHub exposes no
+API for creating them, so `gh` can only store and use what you already have.
+(`gh auth token` prints the token `gh` currently uses; `gh auth refresh -s …`
+only widens OAuth scopes on the built-in login flow, and `gh auth login
+--with-token` accepts a token on stdin — none of them create one.)
+
+Create it in the browser instead:
+
+1. **Settings → Developer settings → Personal access tokens → Fine-grained
+   tokens → Generate new token.**
+2. Resource owner: yourself, or the organisation if the repositories belong to
+   one (an org owner may need to approve it).
+3. Repository access: *Only select repositories* for the narrow case, or *All
+   repositories* if you want one token for everything.
+4. Repository permissions — set these to **Read-only**:
+   - **Pull requests** — for `gh pr view`, `gh pr checks`, `gh pr diff`
+   - **Actions** — for `gh run list`, `gh run view --log-failed`
+   - **Checks** — for check-run detail behind `gh pr checks`
+   - **Contents** — only if you also want `gh pr diff` to fetch file contents
+   - **Metadata** is granted automatically and cannot be removed
+5. Set an expiration, generate, and copy the `github_pat_…` value — it is shown
+   once.
+
+Then hand it to `sbx`:
+
+```sh
+security add-generic-password -a "$USER" -s gh-ro -w 'github_pat_…' -U
+```
+
+To confirm the token is read-only before trusting it with an agent:
+
+```sh
+GH_TOKEN=$(security find-generic-password -a "$USER" -s gh-ro -w) gh api user --jq .login
+GH_TOKEN=$(security find-generic-password -a "$USER" -s gh-ro -w) gh api rate_limit --jq .resources.graphql.remaining
+```
+
+A push attempt with it fails, which is the property that matters:
+
+```sh
+GH_TOKEN=… gh api -X PUT /repos/OWNER/REPO/contents/PROBE -f message=x -f content=eA==   # 403/404
+```
+
 `sbx` reads it with `security find-generic-password` *before* applying the
 sandbox, then exports `GH_CONFIG_DIR` (under `~/.local/state`) and `GH_TOKEN`.
 A fine-grained token with **Pull requests: read** and **Actions: read** cannot
