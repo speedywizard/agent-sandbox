@@ -178,43 +178,81 @@ fi
 # Which token: --gh-profile, then $GH_ITEM, then the owner of origin in
 # $CONF_DIR/gh-accounts, then the default item. Lets one machine hold several
 # accounts on the same host.
-gh_owner() {
+# The GitHub identity of the project: owner/repo of origin, the owner alone, or
+# — for a workspace that holds several repositories — the owner they share.
+gh_slug() {
   _url=$(git -C "$PROJECT" remote get-url origin 2>/dev/null) || return 1
   _url=${_url%.git}
   case "$_url" in
-    *://*) _rest=${_url#*://}; _rest=${_rest#*@}; _owner=${_rest#*/}; _owner=${_owner%%/*} ;;
-    *@*:*) _rest=${_url#*:}; _owner=${_rest%%/*} ;;
-    *) return 1 ;;
+    *://*) _p=${_url#*://}; _p=${_p#*/} ;;
+    *@*:*) _p=${_url#*:} ;;
+    *)     return 1 ;;
   esac
-  [ -n "$_owner" ] && printf '%s' "$_owner"
+  case "$_p" in */*) printf '%s' "$_p" ;; *) return 1 ;; esac
+}
+
+gh_workspace_owner() {
+  _owners=""
+  for _d in "$PROJECT"/*/; do
+    [ -d "${_d}.git" ] || continue
+    _u=$(git -C "$_d" remote get-url origin 2>/dev/null) || continue
+    _u=${_u%.git}
+    case "$_u" in
+      *://*) _p=${_u#*://}; _p=${_p#*/} ;;
+      *@*:*) _p=${_u#*:} ;;
+      *)     continue ;;
+    esac
+    _o=${_p%%/*}
+    [ -n "$_o" ] || continue
+    case " $_owners " in *" $_o "*) ;; *) _owners="$_owners $_o" ;; esac
+  done
+  _owners=${_owners# }
+  case "$_owners" in
+    ''|*' '*) return 1 ;;          # none, or several owners: ambiguous
+    *)        printf '%s' "$_owners" ;;
+  esac
 }
 
 gh_item() {
   [ -n "${GH_PROFILE:-}" ] && { printf 'gh-ro.%s' "$GH_PROFILE"; return; }
   [ -n "${GH_ITEM:-}" ]    && { printf '%s' "$GH_ITEM"; return; }
-  _owner=$(gh_owner) || _owner=""
-  _base=${PROJECT##*/}
-  if [ -f "$CONF_DIR/gh-accounts" ]; then
-    # A key matches the project path, the project's directory name, or the
-    # owner of origin — whichever comes first in the file wins.
+  [ -f "$CONF_DIR/gh-accounts" ] || { printf 'gh-ro'; return; }
+
+  # Candidates in priority order: project path, owner/repo, owner, then — for a
+  # workspace with no origin of its own — the owner its repositories share, and
+  # only then the directory name.
+  _cands=$PROJECT
+  _slug=$(gh_slug) || _slug=""
+  [ -n "$_slug" ] && _cands="$_cands
+$_slug
+${_slug%%/*}"
+  _ws=$(gh_workspace_owner) || _ws=""
+  [ -n "$_ws" ] && _cands="$_cands
+$_ws"
+  _cands="$_cands
+${PROJECT##*/}"
+
+  _old_ifs=$IFS; IFS='
+'
+  for _cand in $_cands; do
+    IFS=$_old_ifs
     while read -r _name _item; do
       case "$_name" in ''|'#'*) continue ;; esac
-      # accept "key item", "key: item" and "key=item"
-      case "$_name" in
-        *'='*) [ -z "$_item" ] && { _item=${_name#*=}; _name=${_name%%=*}; } ;;
-      esac
+      case "$_name" in *'='*) [ -z "$_item" ] && { _item=${_name#*=}; _name=${_name%%=*}; } ;; esac
       _name=${_name%:}
       _key=$_name
       case "$_key" in "~/"*) _key="$HOME/${_key:2}" ;; esac
       case "$_key" in
         /*) _real=$(cd "$_key" 2>/dev/null && pwd -P)
-            [ "$_real" = "$PROJECT" ] && { printf '%s' "$_item"; return; } ; continue ;;
+            [ "$_real" = "$PROJECT" ] && { IFS=$_old_ifs; printf '%s' "$_item"; return; }
+            continue ;;
       esac
-      if [ "$_key" = "$_base" ] || { [ -n "$_owner" ] && [ "$_key" = "$_owner" ]; }; then
-        printf '%s' "$_item"; return
-      fi
+      [ "$_key" = "$_cand" ] && { IFS=$_old_ifs; printf '%s' "$_item"; return; }
     done < "$CONF_DIR/gh-accounts"
-  fi
+    IFS='
+'
+  done
+  IFS=$_old_ifs
   printf 'gh-ro'
 }
 
@@ -268,7 +306,9 @@ if [ "$DOCTOR" -eq 1 ]; then
     done < "$CONF_DIR/gh-accounts"
   fi
   printf 'dir name      %s\n' "${PROJECT##*/}"
-  printf 'origin owner  %s\n' "$(gh_owner || echo '(none)')"
+  printf 'origin slug   %s\n' "$(gh_slug || echo '(none)')"
+  printf 'workspace own %s\n' "$(gh_workspace_owner || echo '(none or ambiguous)')"
+
   _item=$(gh_item)
   printf 'chosen item   %s\n' "$_item"
   if /usr/bin/security find-generic-password -a "${GH_ACCOUNT:-$USER}" -s "$_item" -w >/dev/null 2>&1; then
